@@ -1,0 +1,641 @@
+---
+title: "Untitled"
+author: "Eliane Mopo"
+date: "2024-04-16"
+output: html_document
+---
+
+```{r}
+# Read the data
+library(readr)
+bitcoin_data <- read_delim("MyData.csv", delim = ";")
+Gold_Price <- read_delim("Gold_Price.csv")
+VSTOXX <- read_delim("VSTOXX.csv")
+newdata <- read_csv("dfs.csv")
+```
+
+```{r}
+# Check for missing values
+missing_values <- colSums(is.na(bitcoin_data))
+
+# Convert data types if needed (e.g., convert timestamp to Date)
+bitcoin_data$timestamp <- as.Date(bitcoin_data$timestamp)
+
+# Calculate bitcoin returns and add it as a column in the data
+bitcoin_data$daily_return <- ((bitcoin_data$close - bitcoin_data$open) / bitcoin_data$open) * 100
+```
+
+```{r}
+summary(bitcoin_data$close)
+```
+
+
+
+# Downloading of the covariates
+
+```{r}
+#rm(list = ls())
+# Needed libraries
+library(tidyquant)
+library(quantmod)
+library(qrmtools)
+# install.packages("pacman")
+
+
+
+start <- "2010-07-13"
+end <- "2024-04-09"
+
+# Stock market  indices + stock market volatility indices
+tickers <- c("DJI", "^GSPC", "NDAQ", "^FTSE", "^N225", "000001.SS", "VXD", "VIX")
+
+for (ticker in tickers){
+  if (ticker != "000001.SS"){
+    cat("Getting", ticker, "\n")
+    getSymbols(ticker, from = start,
+           to = end, warnings = FALSE,
+           auto.assign = TRUE)
+  } else {
+    SSEC <- get_data(ticker, from = start, to = end, warn = F)
+  }
+}
+
+# Currency pairs + WTI and BRENT oil prices definition
+currency_pairs <- c("EURUSD=X", "GBPUSD=X", "CNYUSD=X", "JPYUSD=X","CL=F", "BZ=F") #
+
+# Download the exchange rate data
+getSymbols(currency_pairs, src = "yahoo", from = start, to = end)
+
+# Download the US EPU index data
+getSymbols("USEPUINDXD", src = "FRED", from = end, to = end)
+```
+
+
+
+```{r}
+#ls()
+# Accessing currency pairs
+EURUSD <- `EURUSD=X`$`EURUSD=X.Close`
+GBPUSD <-`GBPUSD=X`$`GBPUSD=X.Close`
+CNYUSD <- `CNYUSD=X`$`CNYUSD=X.Close`
+JPYUSD <- `JPYUSD=X`$`JPYUSD=X.Close`
+
+# Accessing oil prices
+WTI  <- `CL=F`$`CL=F.Close`
+BRENT <- `BZ=F`$`BZ=F.Close`
+```
+
+
+
+```{r}
+library(ggplot2)
+ggplot(bitcoin_data, aes(x = timestamp, y =daily_return)) +
+  geom_line() +
+  labs(x = "Period", y = "Daily Return (%)")   # Daily Returns Of Bitcoin Over Time
+ggplot(bitcoin_data, aes(x = timestamp, y =close)) +
+  geom_line() +
+  labs(x = "Period", y = "Closing Price")      #Closing Prices Of Bitcoin Over Time
+
+# Plot histogram of returns
+hist(bitcoin_data$daily_return, breaks = 50, col = "skyblue", main = "Histogram of Bitcoin Returns", xlab = "Daily Returns")
+
+# Boxplot of Bitcoin returns
+boxplot(bitcoin_data$daily_return, 
+        main = "Boxplot of Bitcoin Returns", 
+        ylab = "Daily Return (%)",                     
+        col = "blue",                      
+        border = "black"                      
+)
+
+colnames(bitcoin_data)[colnames(bitcoin_data) == "timeOpen"] <- "Date"
+bitcoin_data_subset <- bitcoin_data[bitcoin_data$Date >= "2010-07-15" & bitcoin_data$Date <= "2013-07-15", ]
+ggplot(bitcoin_data_subset, aes(x = timestamp, y =daily_return)) +
+  geom_line() +
+  labs(x = "Period", y = "Daily Return (%)")   # Daily Returns Of Bitcoin Over 3 Years
+summary(bitcoin_data$daily_return)
+```
+
+
+
+# Prepering all the covariates
+
+```{r}
+colnames(bitcoin_data)[colnames(bitcoin_data) == "timeOpen"] <- "Date"
+bitcoin_data$Date <- as.Date(bitcoin_data$Date, format = "%Y-%m-%d")
+VSTOXX$Date <- as.Date(VSTOXX$Date, format = "%m/%d/%Y")
+bitcoin_inv <- bitcoin_data[rev(row.names(bitcoin_data)), ]
+merge_data1 <- merge(bitcoin_inv, data.frame(Date=index(FTSE), FTSE_Close=coredata(Cl(FTSE))), by = "Date", all.x = TRUE)
+merge_data1 <- merge(merge_data1, data.frame(Date=index(GSPC), GSPC_Close=coredata(Cl(GSPC))), by = "Date", all.x = TRUE)
+merge_data1 <- merge(merge_data1, data.frame(Date=index(DJI), DJI_Close=coredata(Cl(DJI))), by = "Date", all.x = TRUE)
+merge_data1 <- merge(merge_data1, data.frame(Date=index(SSEC), SSEC_Close=coredata(SSEC)), by = "Date", all.x = TRUE)
+merge_data1 <- merge(merge_data1, data.frame(Date=index(NDAQ), NDAQ_Close=coredata(Cl(NDAQ))), by = "Date", all.x = TRUE)
+merge_data1 <- merge(merge_data1, data.frame(Date=index(N225), N225_Close=coredata(Cl(N225))), by = "Date", all.x = TRUE)
+colnames(merge_data1)[colnames(merge_data1) == "X000001.SS"] <- "SSEC.Close"
+
+#merge_data <- merge(bitcoin_inv, data.frame(Date=index(VIX), VIX_Close=coredata(Cl(VIX))), by = "Date", all.x = TRUE)
+merge_data2 <- merge(bitcoin_inv, data.frame(Date=index(VXD), VXD_Close=coredata(Cl(VXD))), by = "Date", all.x = TRUE)
+merge_data2 <- merge(merge_data2, data.frame(Date=VSTOXX$Date, VSTOXX_Close=coredata(VSTOXX$Price)), by = "Date", all.x = TRUE)
+
+merge_data3 <- merge(bitcoin_inv, data.frame(Date=index(EURUSD), EURUSD_Close=coredata(EURUSD)), by = "Date", all.x = TRUE)
+merge_data3 <- merge(merge_data3, data.frame(Date=index(GBPUSD), GBPUSD_Close=coredata(GBPUSD)), by = "Date", all.x = TRUE)
+merge_data3 <- merge(merge_data3, data.frame(Date=index(CNYUSD), CNYUSD_Close=coredata(CNYUSD)), by = "Date", all.x = TRUE)
+merge_data3 <- merge(merge_data3, data.frame(Date=index(JPYUSD), JPYUSD_Close=coredata(JPYUSD)), by = "Date", all.x = TRUE)
+
+
+merge_data4 <- merge(bitcoin_inv, data.frame(Date=index(WTI), WTI_Close=coredata(WTI)), by = "Date", all.x = TRUE)
+merge_data4 <- merge(merge_data4, data.frame(Date=index(BRENT), BRENT_Close=coredata(BRENT)), by = "Date", all.x = TRUE)
+
+
+merge_data5 <- merge(bitcoin_inv, data.frame(Date=Gold_Price$Date, Gold_Price_Close=coredata(Gold_Price$Price)), by = "Date", all.x = TRUE)
+
+
+FTSE_Close <- na.omit(merge_data1)$FTSE.Close
+GSPC_Close <- na.omit(merge_data1)$GSPC.Close
+DJI_Close <- na.omit(merge_data1)$DJI.Close
+SSEC_Close <- na.omit(merge_data1)$SSEC.Close
+NDAQ_Close <- na.omit(merge_data1)$NDAQ.Close
+N225_Close <- na.omit(merge_data1)$N225.Close
+
+#VIX_Close <- na.omit(merge_data)$VIX.Close
+VXD_Close <- na.omit(merge_data2)$VXD.Close
+VSTOXX_Close <- na.omit(merge_data2)$VSTOXX_Close
+
+EURUSD_Close <- na.omit(merge_data3)$EURUSD.X.Close
+GBPUSD_Close <- na.omit(merge_data3)$GBPUSD.X.Close
+CNYUSD_Close <- na.omit(merge_data3)$CNYUSD.X.Close
+JPYUSD_Close <- na.omit(merge_data3)$JPYUSD.X.Close
+
+WTI_Close <- na.omit(merge_data4)$CL.F.Close
+BRENT_Close <- na.omit(merge_data4)$BZ.F.Close
+
+Gold_Price_Close <- na.omit(merge_data5)$Gold_Price_Close
+
+na.omit(merge_data5)
+
+```
+
+
+
+```{r}
+# Load required packages
+library(rstan) # Which helps in implementing Bayesian models, conduct hypothesis testing and model comparison using Bayesian techniques 
+
+# Define the Stan model
+stan_code <- "
+functions {
+  real gen_gamma_lpdf(real x, real a, real d, real p) {
+    real b = 1;  // scale parameter, assuming b = 1 for simplicity
+    return log(p) + (a * p - 1) * log(x) - pow(x / b, p) - lgamma(d) - (a * p) * log(b);
+  }
+}
+data {
+  int<lower=0> T;         // Number of observations
+  int<lower=0> k;         // Number of covariates
+  vector[T] y;            // Returns of Bitcoin
+  matrix[T, k] x;         // Matrix of covariates
+}
+
+parameters {
+  vector[k] beta;         // Coefficients
+  real mu;                // Drift
+  real<lower=0> sigma;    // Standard deviation of log-volatility
+  real<lower=-1, upper=1> phi;  // Persistence
+  real<lower=2> nu;       // Degrees of freedom for Student's t distribution
+  real<lower=0, upper=1> rho;   // Correlation between epsilon_t and eta_t
+}
+
+transformed parameters {
+  vector[T] h;            // Unobserved log-volatility process
+  vector[T] eta;          // Gaussian white noise sequences
+
+  h[1] = mu;              // Initial value of h
+  eta = rep_vector(0, T); // Initialize eta as a vector of zeros
+  for (t in 2:T) {
+    h[t] = mu + phi * (h[t-1] - mu) + sigma * eta[t-1];
+  }
+}
+
+model {
+  // Priors
+  beta ~ normal(0, 1);    // Prior for beta
+  mu ~ normal(0, 100);    // Prior for mu
+  sigma ~ gen_gamma(sqrt(2), 1, 2);  // Prior for sigma
+  phi ~ beta(5, 1.5);     // Prior for phi
+  rho ~ beta(4, 4);       // Prior for rho
+  (nu - 2) ~ exponential(0.1);  // Prior for nu
+
+  // Likelihood
+  for (t in 1:T) {
+    target += normal_lpdf(y[t] | dot_product(x[t], beta) + exp(h[t]/2) * eta[t], 1);
+  }
+}
+
+generated quantities {
+  vector[T] epsilon;      // Error terms
+
+  for (t in 1:T) {
+    epsilon[t] = student_t_rng(nu, 0, 1);
+  }
+}
+"
+
+
+# Compile the Stan model
+model <- stan_model(model_code = stan_code)
+
+# Prepare data
+T1 <- nrow(na.omit(merge_data1))
+y1 <- as.vector(t(na.omit(merge_data1)[, "daily_return"]))
+
+T2 <- nrow(na.omit(merge_data2))
+y2 <- as.vector(t(na.omit(merge_data2)[, "daily_return"]))
+
+T3 <- nrow(na.omit(merge_data3))
+y3 <- as.vector(t(na.omit(merge_data3)[, "daily_return"]))
+
+T4 <- nrow(na.omit(merge_data4))
+y4 <- as.vector(t(na.omit(merge_data4)[, "daily_return"]))
+
+T5 <- nrow(na.omit(merge_data5))
+y5 <- as.vector(t(na.omit(merge_data5)[, "daily_return"]))
+
+
+# Covariates' matrices 
+x1<- cbind(FTSE_Close , GSPC_Close, DJI_Close, SSEC_Close, NDAQ_Close, N225_Close)
+k1<-dim(x1)[2] # Number of covariates1
+
+x2<- cbind(VXD_Close, VSTOXX_Close)
+k2<-dim(x2)[2] # Number of covariates2
+
+x3<- cbind(EURUSD_Close,GBPUSD_Close,CNYUSD_Close,JPYUSD_Close)
+k3<-dim(x3)[2] # Number of covariates3
+
+x4<- cbind(WTI_Close , BRENT_Close)
+k4<-dim(x4)[2] # Number of covariates4
+
+x5<- cbind(Gold_Price_Close)
+k5<-dim(x5)[2] # Number of covariates5
+
+```
+
+
+
+
+
+
+```{r}
+fit1 <- sampling(model, data = list(T = T1, k = k1, y = y1, x = x1), chains = 4, iter = 10000, warmup = 5000)
+summary(fit1)
+# Check convergence
+tryCatch({
+  traceplot(fit1)
+}, error = function(e) {
+  cat("Error occurred:", conditionMessage(e), "\n")
+})
+#traceplot(fit, pars = c("parameter1", "parameter2", "parameter3"))
+```
+
+
+
+```{r}
+# This case is good because of the values of r_hat whose are closed to 1 (all of them) 
+fit2 <- sampling(model, data = list(T = T2, k = k2, y = y2, x = x2), chains = 4, iter = 2000, warmup = 1000)
+summary(fit2)
+# Check convergence
+tryCatch({
+  traceplot(fit2)  # traceplot genere des graphiques pour visualiser la convergence des chaines de Markov
+}, error = function(e) {
+  cat("Error occurred:", conditionMessage(e), "\n")
+})
+#traceplot(fit, pars = c("parameter1", "parameter2", "parameter3"))
+```
+
+
+```{r}
+fit3 <- sampling(model, data = list(T = T3, k = k3, y = y3, x = x3), chains = 4, iter = 10000, warmup = 5000)
+summary(fit3)
+# Check convergence
+tryCatch({
+  traceplot(fit3)
+}, error = function(e) {
+  cat("Error occurred:", conditionMessage(e), "\n")
+})
+#traceplot(fit, pars = c("parameter1", "parameter2", "parameter3"))
+```
+
+
+```{r}
+fit4 <- sampling(model, data = list(T = T4, k = k4, y = y4, x = x4), chains = 4, iter = 10000, warmup = 5000)
+summary(fit4)
+# Check convergence
+tryCatch({
+  traceplot(fit4)
+}, error = function(e) {
+  cat("Error occurred:", conditionMessage(e), "\n")
+})
+#traceplot(fit, pars = c("parameter1", "parameter2", "parameter3"))
+```
+
+
+```{r}
+fit5 <- sampling(model, data = list(T = T5, k = k5, y = y5, x = x5), chains = 4, iter = 10000, warmup = 5000)
+summary(fit5)
+# Check convergence
+tryCatch({
+  traceplot(fit5)
+}, error = function(e) {
+  cat("Error occurred:", conditionMessage(e), "\n")
+})
+#traceplot(fit, pars = c("parameter1", "parameter2", "parameter3"))
+```
+
+
+
+```{r}
+# Extract the samples
+tryCatch({
+  posterior_samples <- as.matrix(fit)
+}, error = function(e) {
+  cat("Error occurred:", conditionMessage(e), "\n")
+})
+```
+
+
+
+
+# For stock market volatility indices
+
+```{r}
+# Load necessary libraries
+library(rstan)
+library(bayesplot)
+library(MCMCpack)
+library(coda)
+
+# Define the model
+model_code <- '
+data {
+  int<lower=0> T; // number of time points
+  int<lower=0>k ;          // Number of covariates
+  matrix[T, k] x; // matrix of covariates
+  vector[T] y; // vector of Bitcoin returns
+}
+parameters {
+  vector[k] beta; // coefficients
+  real mu; // drift of log-volatility
+  real<lower=0, upper=1> phi; // persistence of log-volatility
+  real<lower=0> sigma; // standard deviation of log-volatility
+  vector[T] h; // log-volatility process
+  real<lower=0> nu; // degrees of freedom for Students t distribution
+  real<lower=-1, upper=1> rho; // correlation between error terms
+}
+model {
+  // Priors
+  beta ~ normal(0, 1);
+  mu ~ normal(0, 10);
+  sigma ~ gamma(1, 0.5); // GG(√2, 1, 2) equivalent
+  phi ~ beta(5, 1.5);
+  (nu-2) ~ exponential(0.1) ;
+  rho ~ beta(4, 4);
+
+  // Likelihood
+  for (t in 1:T) {
+    if (t == 1) {
+      h[t] ~ normal(mu, sigma / sqrt(1 - phi * phi));
+    } else {
+      h[t] ~ normal(mu + phi * (h[t-1] - mu), sigma);
+    }
+    y[t] ~ student_t(nu, x[t] * beta, exp(h[t] / 2));
+  }
+}
+'
+
+# Data preparation
+T <- nrow(na.omit(merge_data))
+y <- as.vector(t(na.omit(merge_data)[, "daily_return"]))
+x<- cbind(FTSE_Close , GSPC_Close, DJI_Close, SSEC_Close, NDAQ_Close, N225_Close, VXD_Close, VSTOXX_Close,Gold_Price_Close)
+k<-dim(x)[2] # Number of covariates
+#x <- as.matrix(covariates)
+#y <- bitcoin_returns
+
+# Model fitting using rstan
+fit <- stan(model_code=model_code, data=list(T=T, k=k, x=x, y=y),
+            iter=50, warmup=25, thin=1, chains=1)
+```
+
+
+```{r}
+# Extracting results
+posterior_samples <- extract(fit)
+beta_estimates <- posterior_samples$beta
+mu_estimate <- posterior_samples$mu
+phi_estimate <- posterior_samples$phi
+sigma_estimate <- posterior_samples$sigma
+nu_estimate <- posterior_samples$nu
+rho_estimate <- posterior_samples$rho
+
+# Posterior analysis
+print(summary(fit))
+traceplot(as.mcmc.list(fit))
+
+# Tracer les diagnostics de convergence
+mcmc_pairs(fit)
+mcmc_plot(fit)
+```
+
+
+
+
+```{r}
+x<- cbind(FTSE_Close , GSPC_Close, DJI_Close, SSEC_Close, NDAQ_Close, N225_Close)
+k<-dim(x)[2] # Number of covariates
+
+# Run the model
+fit <- sampling(model, data = list(T = T, k = k, y = y, x = x), chains = 1)
+
+summary(fit)
+# Load required packages
+library(rstan)
+
+# Check convergence
+tryCatch({
+  # Check convergence
+  traceplot(fit)
+}, error = function(e) {
+  cat("Error occurred:", conditionMessage(e), "\n")
+})
+#traceplot(fit, pars = c("parameter1", "parameter2", "parameter3"))
+```
+
+
+
+
+```{r}
+# Load required libraries
+library(TTR)  # For technical analysis indicators
+library(ggplot2)  # For plotting
+
+# Calculate Moving Averages
+bitcoin_data$SMA_50 <- SMA(bitcoin_data$close, n = 50)
+bitcoin_data$SMA_200 <- SMA(bitcoin_data$close, n = 200)
+
+# Calculate Bollinger Bands
+bb <- BBands(bitcoin_data$close, n = 20, sd = 2)
+bitcoin_data$Upper_BB <- bb[, "dn"]
+bitcoin_data$Lower_BB <- bb[, "up"]
+
+
+# Calculate RSI
+rsi <- RSI(bitcoin_data$close, n = 14)
+bitcoin_data$RSI <- rsi
+
+# Calculate MACD
+macd <- MACD(bitcoin_data$close, nFast = 12, nSlow = 26, nSig = 9)
+bitcoin_data$MACD <- macd[, "macd"]
+
+# Calculate MACD Signal
+bitcoin_data$MACD_Signal <- macd[,"signal"]
+
+
+# Plotting
+ggplot(bitcoin_data, aes(x = timestamp)) +
+  geom_line(aes(y = close), color = 'blue', linetype = 'solid') +
+  geom_line(aes(y = SMA_50), color = 'red', linetype = 'dashed') +
+  geom_line(aes(y = SMA_200), color = 'green', linetype = 'dashed') +
+  geom_line(aes(y = Upper_BB), color = 'orange', linetype = 'dotted') +
+  geom_line(aes(y = Lower_BB), color = 'orange', linetype = 'dotted') +
+  labs(title = 'Bitcoin Price with Moving Averages and Bollinger Bands',
+       x = 'Period', y = 'Price (USD)') +
+  theme_minimal()
+
+
+ggplot(bitcoin_data, aes(x = timestamp)) +
+  geom_line(aes(y = RSI)) +
+  geom_hline(yintercept = c(70, 30), color = 'red', linetype = 'dashed') +
+  labs(title = 'RSI for Bitcoin', x = 'Period', y = 'RSI') +
+  theme_minimal()
+
+ggplot(bitcoin_data, aes(x = timestamp)) +
+  geom_line(aes(y = MACD), color = 'blue', linetype = 'solid') +
+  geom_line(aes(y = MACD_Signal), color = 'red', linetype = 'dashed') +
+  labs(title = 'MACD for Bitcoin', x = 'Period', y = 'MACD') +
+  theme_minimal()
+
+```
+
+
+
+
+
+
+
+
+```{r}
+# Load required libraries
+library(plotly)
+
+# Assuming bitcoin_data contains columns: timestamp, open, high, low, close
+# Convert timestamp to POSIXct
+bitcoin_data$timestamp <- as.POSIXct(bitcoin_data$timestamp)
+
+# Create candlestick chart
+candlestick <- plot_ly(data = bitcoin_data, type = "candlestick",
+                       x = ~timestamp,
+                       open = ~open,
+                       high = ~high,
+                       low = ~low,
+                       close = ~close)
+
+# Add title and axis labels
+candlestick <- candlestick %>% layout(title = "Bitcoin Candlestick Chart",
+                                      xaxis = list(title = "Period"),
+                                      yaxis = list(title = "Price"))
+
+# Display the candlestick chart
+candlestick
+
+```
+
+
+
+```{r}
+# Install and load the quantmod package
+#install.packages("quantmod")
+library(quantmod)
+library(xts)
+library(zoo)
+
+# Correcting the conversion to xts
+CandlestickBitcoin <- xts(bitcoin_data[, c("open", "high", "low", "close")], order.by = bitcoin_data$timeOpen)
+
+# Plotting the candlestick chart
+chartSeries(CandlestickBitcoin, type = "candlesticks")
+
+```
+
+
+
+
+
+
+```{r}
+# run the next line if you already have rstan installed
+# remove.packages(c("StanHeaders", "rstan"))
+
+# install.packages("rstan", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
+library(rstan)
+library(bayesplot)
+
+# Convert to time series if needed
+bitcoin_ts <- xts(bitcoin_data[, c("open", "high", "low", "close")], order.by = bitcoin_data$timeOpen)
+
+```
+
+
+```{r}
+if (FALSE) {
+# Create a stanfit object from reading CSV files of samples (saved in rstan
+# package) generated by funtion stan for demonstration purpose from model as follows. 
+# 
+excode <- '
+  transformed data {
+    array[20] real y;
+    y[1] <- 0.5796;  y[2]  <- 0.2276;   y[3] <- -0.2959; 
+    y[4] <- -0.3742; y[5]  <- 0.3885;   y[6] <- -2.1585;
+    y[7] <- 0.7111;  y[8]  <- 1.4424;   y[9] <- 2.5430; 
+    y[10] <- 0.3746; y[11] <- 0.4773;   y[12] <- 0.1803; 
+    y[13] <- 0.5215; y[14] <- -1.6044;  y[15] <- -0.6703; 
+    y[16] <- 0.9459; y[17] <- -0.382;   y[18] <- 0.7619;
+    y[19] <- 0.1006; y[20] <- -1.7461;
+  }
+  parameters {
+    real mu;
+    real sigma;
+    vector[2] z[3];
+    real alpha;
+  } 
+  model {
+    y ~ normal(mu, sigma);
+    for (i in 1:3) 
+      z[i] ~ normal(0, 1);
+    alpha ~ exponential(2);
+  } 
+'
+# exfit <- stan(model_code = excode, save_dso = FALSE, iter = 200, 
+#               sample_file = "rstan_doc_ex.csv")
+# 
+exfit <- read_stan_csv(dir(system.file('misc', package = 'rstan'),
+                       pattern='rstan_doc_ex_[[:digit:]].csv',
+                       full.names = TRUE))
+
+print(exfit)
+traceplot(exfit)
+traceplot(exfit, size = 0.25)
+traceplot(exfit, pars = "sigma", inc_warmup = TRUE)
+
+trace <- traceplot(exfit, pars = c("z[1,1]", "z[3,1]"))
+trace + scale_color_discrete() + theme(legend.position = "top")
+}
+
+```
+
